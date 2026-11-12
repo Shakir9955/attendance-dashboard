@@ -890,7 +890,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     </div>
 
     <div class="ot-view" id="otViewExcel" role="tabpanel" aria-label="Overtime Excel" hidden>
-      <p class="ot-xl-note">Payroll sheet in the OVER TIME SHEET format — one row per worker, one column per day. <strong>1.5</strong> = overtime that day (any shift), <strong>0</strong> = present on Night shift (no overtime), <strong>-</strong> = absent, blank = present on Day shift (no overtime) or no data / weekend / holiday. Only <strong>approved</strong> overtime from the Overtime Record is counted; pending requests are not included.</p>
+      <p class="ot-xl-note">Attendance sheet — one row per worker, one column per day, with <strong>no overtime</strong> in it. <strong>0</strong> = present on Night shift, <strong>-</strong> = absent, blank = present on Day shift or no data / weekend / holiday. The Total hours this month column stays and shows 0 for everyone.</p>
       <div class="ot-field">
         <label for="otExcelMonth">Month</label>
         <select id="otExcelMonth"></select>
@@ -2726,22 +2726,17 @@ body{font-size:15.5px;letter-spacing:-.005em}
     el.innerHTML = h;
   }
 
-  /* ===== Overtime Excel — OVER TIME SHEET matrix (ONE unified sheet) =====
+  /* ===== Overtime Excel — clean attendance sheet (ONE unified sheet) =====
      Rows = all 69 staff (dashboard order), columns = days of the month, last
      column = "Total hours this month". There is NO 1st Shift / 2nd Shift
-     split: every worker is on this one sheet. Day cells come from the
-     APPROVED Overtime Record (overtime hours, e.g. 1.5 — counted whatever
-     shift the entry was recorded under) plus the dashboard attendance
+     split: every worker is on this one sheet. This sheet contains NO
+     overtime at all — no 1.5 cells and no data from the Overtime Record
+     or the pushed store. Cells come ONLY from the dashboard attendance
      data. Present cells are shift-aware: 0 (green) only when the worker
      was rostered Night shift that day, blank (white) when rostered Day
-     shift that day. "-" = Absent that day (any shift), blank (peach) =
-     no data / weekend / holiday for that day. Because the matrix is
-     rebuilt from attendance + overtime on every render, deleting an
-     overtime entry restores its cell to 0 (Night) or blank (Day).
-     Pending requests never reach otRecord, so they never appear here.
-     The matrix reads otAllRecordEntries() = the live Record plus the pushed
-     store, so entries pushed by "Pushing data into Excel sheet" keep
-     showing here after the Record list is cleared. */
+     shift that day. "-" (orange) = Absent that day (any shift), blank
+     (peach) = no data / weekend / holiday for that day. The Total hours
+     column is kept and is always 0, because there is no overtime here. */
   var OT_PIDX = {};
   PEOPLE.forEach(function(p, i){ OT_PIDX[p[0]] = i; });
   var OT_FIRST_DATE = DATES.length ? DATES[0] : '';
@@ -2757,10 +2752,6 @@ body{font-size:15.5px;letter-spacing:-.005em}
     var seen = {}, list = [];
     DATES.forEach(function(d){
       var ym = String(d || '').slice(0, 7);
-      if(/^\d{4}-\d{2}$/.test(ym) && !seen[ym]){ seen[ym] = true; list.push(ym); }
-    });
-    otAllRecordEntries().forEach(function(e){
-      var ym = String(e.date || '').slice(0, 7);
       if(/^\d{4}-\d{2}$/.test(ym) && !seen[ym]){ seen[ym] = true; list.push(ym); }
     });
     list.sort();
@@ -2781,27 +2772,15 @@ body{font-size:15.5px;letter-spacing:-.005em}
   }
   function otPad2(n){ return (n < 10 ? '0' : '') + n; }
   /* Build the unified matrix for one month — ONE sheet for all workers,
-     with NO shift split: every approved overtime entry counts, whatever
-     shift it was recorded under.
-     Cell: { k: 'ot' (overtime, 1.5) | 'p' (present Night, 0) | 'dp' (present
-     Day, blank white) | 'a' (absent, "-") | '' (blank), v: value }.
+     with NO shift split and NO overtime: cells are attendance only.
+     Cell: { k: 'p' (present Night, 0) | 'dp' (present Day, blank white) |
+     'a' (absent, "-") | '' (blank), v: value }.
      weekend[d] / holiday[d] mark the peach columns (Sat/Sun, plus a weekday inside
      the recorded range with no attendance data at all — a plant holiday). */
   function otMatrix(ym){
     var y = parseInt(ym.slice(0, 4), 10), mo = parseInt(ym.slice(5, 7), 10);
     var daysInMonth = new Date(y, mo, 0).getDate();
-    var otMap = {};
-    var hasOt = false, hasAtt = false;
-    otAllRecordEntries().forEach(function(e){
-      if(String(e.date || '').slice(0, 7) !== ym) return;
-      hasOt = true;
-      var hrs = (typeof e.hours === 'number' && isFinite(e.hours)) ? e.hours : OT_HOURS;
-      (e.workers || []).forEach(function(w){
-        if(!w.emp) return;
-        var key = w.emp + '|' + e.date;
-        otMap[key] = (otMap[key] || 0) + hrs;
-      });
-    });
+    var hasAtt = false;
     DATES.forEach(function(d){ if(String(d).slice(0, 7) === ym) hasAtt = true; });
     var weekend = [], holiday = [];
     for(var d = 1; d <= daysInMonth; d++){
@@ -2824,29 +2803,21 @@ body{font-size:15.5px;letter-spacing:-.005em}
     }
     var rows = OT_STAFF.map(function(s){
       var pIdx = OT_PIDX[s.emp];
-      var cells = [], total = 0;
+      var cells = [];
       for(var d2 = 1; d2 <= daysInMonth; d2++){
         var iso2 = ym + '-' + otPad2(d2);
-        var otHrs = otMap[s.emp + '|' + iso2];
-        if(typeof otHrs === 'number'){
-          var hv = Math.round(otHrs * 10) / 10;
-          cells.push({ k: 'ot', v: hv });
-          total += hv;
-          continue;
-        }
         var cell = { k: '', v: '' };
         var di = Object.prototype.hasOwnProperty.call(dateIdx, iso2) ? dateIdx[iso2] : -1;
         var r = (di >= 0 && typeof pIdx === 'number') ? PREC[pIdx][di] : null;
-        /* Shift-aware Present rule (single unified sheet, no shift split):
+        /* Shift-aware Present rule (single unified sheet, no shift split,
+           attendance only — no overtime):
            Absent shows "-" (orange) regardless of shift. Present shows
            0 (green) only when the worker was rostered NIGHT shift that
            day; when rostered DAY shift that day it stays blank (white,
            kind 'dp' so it never picks up the peach weekend/holiday fill).
            A worker missing from the shift map defaults to Day, matching
            otFilteredStaff. A status of 2 (not yet joined / pending) and
-           days with no data stay blank. Deleting an overtime entry
-           therefore restores blank for a Day worker and 0 for a Night
-           worker automatically on the next render. */
+           days with no data stay blank. */
         if(r){
           if(r[2] === 1) cell = { k: 'a', v: '-' };
           else if(r[2] === 0){
@@ -2857,13 +2828,13 @@ body{font-size:15.5px;letter-spacing:-.005em}
         }
         cells.push(cell);
       }
-      return { name: s.name, emp: s.emp, cells: cells, total: Math.round(total * 10) / 10 };
+      return { name: s.name, emp: s.emp, cells: cells, total: 0 };
     });
-    return { daysInMonth: daysInMonth, weekend: weekend, holiday: holiday, rows: rows, hasData: hasAtt || hasOt };
+    return { daysInMonth: daysInMonth, weekend: weekend, holiday: holiday, rows: rows, hasData: hasAtt };
   }
   function otMatrixHTML(ym){
     var mx = otMatrix(ym);
-    if(!mx.hasData) return '<div class="ot-empty">No overtime recorded for ' + esc(otExcelMonthLabel(ym)) + '.</div>';
+    if(!mx.hasData) return '<div class="ot-empty">No attendance data for ' + esc(otExcelMonthLabel(ym)) + '.</div>';
     var h = '<div class="ot-mx-block">';
     h += '<div class="ot-mx-head"><div class="ot-mx-title">OVER TIME SHEET</div><div class="ot-mx-meta"><span class="ot-mx-month">' + esc(otExcelMonthShort(ym)) + '</span></div></div>';
     h += '<div class="ot-mx-scroll"><table class="ot-mx" aria-label="Over time sheet, ' + esc(otExcelMonthLabel(ym)) + '"><thead><tr>';
@@ -2877,7 +2848,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       h += '<tr><td class="mx-sr">' + (i + 1) + '</td><td class="mx-name">' + esc(r.name) + '</td><td class="mx-emp">' + esc(r.emp) + '</td>';
       r.cells.forEach(function(c, ci){
         var cls = '';
-        if(c.k === 'ot' || c.k === 'p') cls = ' class="mx-g"';
+        if(c.k === 'p') cls = ' class="mx-g"';
         else if(c.k === 'a') cls = ' class="mx-o"';
         else if(c.k === 'dp') cls = '';
         else if(mx.weekend[ci] || mx.holiday[ci]) cls = ' class="mx-w"';
@@ -2906,7 +2877,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     if(otExcelMonthSel.innerHTML !== opts) otExcelMonthSel.innerHTML = opts;
     if(otExcelMonthSel.value !== otExcelSel) otExcelMonthSel.value = otExcelSel;
     if(otExcelSel === 'all'){
-      if(!months.length){ otExcelMatrixEl.innerHTML = '<div class="ot-empty">No overtime recorded yet.</div>'; return; }
+      if(!months.length){ otExcelMatrixEl.innerHTML = '<div class="ot-empty">No attendance data yet.</div>'; return; }
       var h = '';
       months.slice().reverse().forEach(function(ym){ h += otMatrixHTML(ym); });
       otExcelMatrixEl.innerHTML = h;
@@ -2925,7 +2896,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
      bold title, the bold header row and the bold Total column. No libraries.
      Sheet: { name, widths: [..], merges: ['A1:X1'], rows: [[cell, ..], ..] }.
      Cell: null/'' = blank · number · string · { v: value, s: styleIndex } ·
-     { f: 'COUNTIF(D4:AG4,0)+COUNTIF(D4:AG4,1.5)', s: styleIndex } = a real Excel formula cell. */
+     { f: '...', s: styleIndex } = a real Excel formula cell. */
   var MXS = { PLAIN: 0, BOLD: 1, TITLE: 2, HEAD: 3, GREEN: 4, AMBER: 5, PEACH: 6, TOTAL: 7, CENTER: 8, LEFT: 9, HEADW: 10 };
   function buildXlsxBlobStyled(sheets){
     var enc = new TextEncoder();
@@ -3027,8 +2998,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     mx.rows.forEach(function(r, i){
       var row = [{ v: i + 1, s: MXS.CENTER }, { v: r.name, s: MXS.LEFT }, { v: r.emp, s: MXS.LEFT }];
       r.cells.forEach(function(c, ci){
-        if(c.k === 'ot') row.push({ v: c.v, s: MXS.GREEN });
-        else if(c.k === 'p') row.push({ v: 0, s: MXS.GREEN });
+        if(c.k === 'p') row.push({ v: 0, s: MXS.GREEN });
         else if(c.k === 'a') row.push({ v: '-', s: MXS.AMBER });
         else if(c.k === 'dp') row.push({ v: null, s: MXS.CENTER });
         else if(mx.weekend[ci] || mx.holiday[ci]) row.push({ v: null, s: MXS.PEACH });
@@ -3088,7 +3058,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     if(sel === 'all'){
       var months = otExcelMonths();
       if(!months.length){
-        if(otExcelMsgEl){ otExcelMsgEl.textContent = 'No overtime recorded yet — nothing to download.'; otExcelMsgEl.hidden = false; }
+        if(otExcelMsgEl){ otExcelMsgEl.textContent = 'No attendance data yet — nothing to download.'; otExcelMsgEl.hidden = false; }
         return;
       }
       months.slice().reverse().forEach(function(ym){
@@ -3097,7 +3067,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       filename = otExcelFilename('all');
     } else {
       if(!otMatrix(sel).hasData){
-        if(otExcelMsgEl){ otExcelMsgEl.textContent = 'No overtime recorded for ' + otExcelMonthLabel(sel) + ' — nothing to download.'; otExcelMsgEl.hidden = false; }
+        if(otExcelMsgEl){ otExcelMsgEl.textContent = 'No attendance data for ' + otExcelMonthLabel(sel) + ' — nothing to download.'; otExcelMsgEl.hidden = false; }
         return;
       }
       /* ONE unified sheet only — the selected month, with no shift split
@@ -3218,7 +3188,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       blocks.push(otMatrixCsv(sel));
     }
     if(!blocks.length){
-      if(otExcelMsgEl){ otExcelMsgEl.textContent = sel === 'all' ? 'No overtime recorded yet — nothing to copy.' : 'No overtime recorded for ' + otExcelMonthLabel(sel) + ' — nothing to copy.'; otExcelMsgEl.hidden = false; }
+      if(otExcelMsgEl){ otExcelMsgEl.textContent = sel === 'all' ? 'No attendance data yet — nothing to copy.' : 'No attendance data for ' + otExcelMonthLabel(sel) + ' — nothing to copy.'; otExcelMsgEl.hidden = false; }
       return;
     }
     var text = blocks.join('\n\n');
