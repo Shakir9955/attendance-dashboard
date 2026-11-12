@@ -220,6 +220,18 @@ a{color:inherit}
 .ot-group-title{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px}
 .ot-shift-note{margin:0 0 6px;font-size:13.5px;font-weight:700;color:var(--accent-dark);background:var(--accent-soft);border:1px solid var(--accent);border-radius:6px;padding:9px 12px;line-height:1.45}
 @media(prefers-color-scheme:dark){.ot-shift-note{color:var(--accent)}}
+.ot-absent-note{margin:12px 0 0;font-size:13.5px;color:var(--muted);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:9px 12px;line-height:1.5}
+.ot-absent-note summary{cursor:pointer;font-weight:700;color:var(--text)}
+.ot-absent-note summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ot-absent-list{list-style:none;margin:9px 0 2px;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+@media(max-width:640px){.ot-absent-list{grid-template-columns:1fr}}
+.ot-absent-list li{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.ot-absent-list .ot-aname{font-weight:600;color:var(--text)}
+.ot-absent-list .ot-wemp{font-size:12.5px;color:var(--muted);font-weight:600;white-space:nowrap}
+.ot-btn-wdel{appearance:none;font:inherit;font-size:15px;font-weight:800;line-height:1;color:#fff;background:#c81e1e;border:1.5px solid #991b1b;width:26px;height:26px;border-radius:6px;cursor:pointer;display:inline-grid;place-items:center;padding:0;flex:0 0 auto}
+.ot-btn-wdel:hover{background:#991b1b}
+.ot-btn-wdel:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+.ot-table th.ot-th-del,.ot-table td.ot-td-del{text-align:center;width:44px}
 .ot-list{display:grid;grid-template-columns:1fr 1fr;gap:7px}
 @media(max-width:640px){.ot-list{grid-template-columns:1fr}}
 .ot-worker{display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:9px 11px;cursor:pointer;font-size:14px}
@@ -313,6 +325,8 @@ a{color:inherit}
 .ot-mx .mx-w{background:#f8cbad}
 .ot-mx .mx-total{font-weight:800;min-width:56px;background:#f2f2f2}
 .ot-mx thead th.mx-total{background:#d9d9d9}
+.ot-mx .mx-night{font-weight:800;min-width:52px;background:#e2efda}
+.ot-mx thead th.mx-night{background:#c6e0b4}
 /* Delete controls + Clear all */
 .ot-btn-delete{appearance:none;font:inherit;font-size:12.5px;font-weight:800;line-height:1;color:#fff;background:#c81e1e;border:1.5px solid #991b1b;padding:7px 11px;border-radius:6px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
 .ot-btn-delete:hover{background:#991b1b}
@@ -875,6 +889,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       </div>
       <p class="ot-shift-note" id="otShiftNote" role="status" aria-live="polite"></p>
       <div id="otWorkerList"></div>
+      <div id="otAbsentBox"></div>
       <p class="ot-msg" id="otMsg" role="alert" hidden></p>
       <div class="ot-confirm" id="otConfirm" hidden></div>
       <button type="button" class="ot-submit" id="otSubmitBtn">Submit for Review</button>
@@ -891,7 +906,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     </div>
 
     <div class="ot-view" id="otViewExcel" role="tabpanel" aria-label="Overtime Excel" hidden>
-      <p class="ot-xl-note">OVER TIME SHEET — one row per worker, one column per day, reviewed against attendance, Day shift and Night shift. <strong>Overtime 1.5</strong> = white cell for Day (1st Shift) overtime, green cell for Night (2nd Shift) overtime — overtime is 1.5 hours on normal days, never more. <strong>0</strong> = present on Night shift, <strong>-</strong> = absent, blank = present on Day shift or no data / weekend / holiday.</p>
+      <p class="ot-xl-note">OVER TIME SHEET — one row per worker, one column per day, reviewed against attendance, Day shift and Night shift. <strong>Overtime 1.5</strong> = white cell for Day (1st Shift) overtime, green cell for Night (2nd Shift) overtime — overtime is 1.5 hours on normal days, never more. <strong>0</strong> = present on Night shift, <strong>-</strong> = absent, blank = present on Day shift or no data / weekend / holiday. <strong>Total hours this month</strong> = overtime hours (1.5 per overtime day). <strong>Total Night</strong> = Night Shift Allowance count = nights present (0) + nights overtime (1.5) — Day-shift overtime does not count toward Total Night.</p>
       <div class="ot-field">
         <label for="otExcelMonth">Month</label>
         <select id="otExcelMonth"></select>
@@ -2261,6 +2276,54 @@ body{font-size:15.5px;letter-spacing:-.005em}
     otRenderRecord();
     otRenderRequests();
   }
+  /* Individual delete: remove ONE worker from ONE date+shift overtime
+     entry. Only that worker is removed — from the entry in BOTH stores
+     (otRecord and otPushed; the pushed copy of an entry shares its
+     otEntryKey identity) and from the linked Approved request (matched by
+     requestId). If the request is left with no workers it is removed too,
+     and if the entry is left with no workers the whole entry goes. After
+     the delete the Overtime Excel matrix rebuilds that worker's cell from
+     attendance only (Day present → blank white; Night present → 0 green;
+     Absent → "-" orange), because the matrix reads these same stores.
+     `entryKey` (History) pins the delete to one exact entry; without it
+     (Record) every entry of that date+shift holding the worker is used,
+     and the pushed store is matched by the affected entries' keys. */
+  function otDeleteWorkerFromEntry(dateStr, shiftStr, emp, entryKey){
+    var affectedKeys = {}, reqIds = {};
+    function strip(list, matchFn){
+      var out = [];
+      list.forEach(function(e){
+        if(!e || e.date !== dateStr || otShiftOf(e) !== shiftStr || !matchFn(e)){ out.push(e); return; }
+        var has = (e.workers || []).some(function(w){ return w && w.emp === emp; });
+        if(!has){ out.push(e); return; }
+        affectedKeys[otEntryKey(e)] = true;
+        if(e.requestId) reqIds[e.requestId] = true;
+        e.workers = (e.workers || []).filter(function(w){ return !w || w.emp !== emp; });
+        if(e.workers.length) out.push(e);
+      });
+      return out;
+    }
+    if(entryKey){
+      var byKey = function(e){ return otEntryKey(e) === entryKey; };
+      otRecord = strip(otRecord, byKey);
+      otPushed = strip(otPushed, byKey);
+      if(otHistoryExpanded[entryKey]) delete otHistoryExpanded[entryKey];
+    } else {
+      otRecord = strip(otRecord, function(){ return true; });
+      otPushed = strip(otPushed, function(e){ return !!affectedKeys[otEntryKey(e)]; });
+    }
+    var kept = [];
+    otRequests.forEach(function(r){
+      if(r && r.status === 'Approved' && r.id && reqIds[r.id]){
+        r.workers = (r.workers || []).filter(function(w){ return !w || w.emp !== emp; });
+        if(r.workers.length) kept.push(r);
+      } else kept.push(r);
+    });
+    otRequests = kept;
+    otPersist();
+    otRenderRequests();
+    otRenderRecord();
+  }
   /* Identity of one record entry (date + shift + hours + worker set). Used
      to keep an entry that has already been pushed from ever being counted
      twice in the Overtime Excel matrix. */
@@ -2402,13 +2465,26 @@ body{font-size:15.5px;letter-spacing:-.005em}
     return DOW3[dt.getDay()] + ' ' + parseInt(p[2],10) + ' ' + MON3[parseInt(p[1],10)-1] + ' ' + p[0];
   }
   function otHoursText(n){ var v = Math.round(n*10)/10; return (v % 1 === 0 ? String(v) + '.0' : String(v)); }
-  function otTableHTML(workers, showEmp){
+  /* Worker table (S.No. | Names | Overtime Hrs + Total row). The optional
+     `del` spec adds a small per-worker delete (×) button on each row:
+     { kind: 'rec', date, shift } for the Overtime Record, or
+     { kind: 'hist', key, date, shift } for History. The click handlers on
+     the two lists pick the button up and run the password-gated
+     otDeleteWorkerFromEntry(). Request tables pass no `del`. */
+  function otTableHTML(workers, showEmp, del){
     var total = workers.length * OT_HOURS;
-    var h = '<div class="ot-table-wrap"><table class="ot-table"><thead><tr><th class="ot-th-num">S.No.</th><th>Names</th><th class="ot-th-hrs">Overtime Hrs</th></tr></thead><tbody>';
+    var h = '<div class="ot-table-wrap"><table class="ot-table"><thead><tr><th class="ot-th-num">S.No.</th><th>Names</th><th class="ot-th-hrs">Overtime Hrs</th>' + (del ? '<th class="ot-th-del"><span class="sr">Remove worker</span></th>' : '') + '</tr></thead><tbody>';
     workers.forEach(function(w, i){
-      h += '<tr><td class="ot-td-num">' + (i + 1) + '</td><td><span class="ot-tname">' + esc(w.name) + '</span>' + (showEmp && w.emp ? '<span class="ot-temp">Emp ' + esc(w.emp) + '</span>' : '') + '</td><td class="ot-td-hrs">1.5</td></tr>';
+      h += '<tr><td class="ot-td-num">' + (i + 1) + '</td><td><span class="ot-tname">' + esc(w.name) + '</span>' + (showEmp && w.emp ? '<span class="ot-temp">Emp ' + esc(w.emp) + '</span>' : '') + '</td><td class="ot-td-hrs">1.5</td>';
+      if(del){
+        var attrs = del.kind === 'hist'
+          ? 'data-ot-hist-wdel="' + esc(w.emp || '') + '" data-ot-hist-wdel-key="' + esc(del.key) + '"'
+          : 'data-ot-rec-wdel="' + esc(w.emp || '') + '"';
+        h += '<td class="ot-td-del"><button type="button" class="ot-btn-wdel" ' + attrs + ' data-ot-wdel-date="' + esc(del.date) + '" data-ot-wdel-shift="' + esc(del.shift) + '" aria-label="Remove ' + esc(w.name) + ' from this overtime entry" title="Remove this worker from this entry">&times;</button></td>';
+      }
+      h += '</tr>';
     });
-    h += '</tbody><tfoot><tr><td class="ot-td-num"></td><td>Total</td><td class="ot-td-hrs">' + otHoursText(total) + ' hrs</td></tr></tfoot></table></div>';
+    h += '</tbody><tfoot><tr><td class="ot-td-num"></td><td>Total</td><td class="ot-td-hrs">' + otHoursText(total) + ' hrs</td>' + (del ? '<td class="ot-td-del"></td>' : '') + '</tr></tfoot></table></div>';
     return h;
   }
   function otEmailBody(req){
@@ -2527,12 +2603,33 @@ body{font-size:15.5px;letter-spacing:-.005em}
     var dateVal = otDateInput ? otDateInput.value : '';
     var want = (otShiftInput && otShiftInput.value === '2nd Shift') ? 'Night' : 'Day';
     var info = otShiftInfoForDate(dateVal);
-    if(!info.map) return { list: OT_STAFF.slice(), info: info, want: want, dateVal: dateVal };
-    var list = OT_STAFF.filter(function(s){
+    var base;
+    if(!info.map) base = OT_STAFF.slice();
+    else base = OT_STAFF.filter(function(s){
       var sh = info.map[s.emp] || 'Day';
       return sh === want;
     });
-    return { list: list, info: info, want: want, dateVal: dateVal };
+    /* Present-only rule (user order 12 Nov 2026): when the dashboard holds
+       attendance for the selected date (otShiftInfoForDate source 'record',
+       i.e. the per-date daily records), the selectable list is filtered
+       further to workers marked Present that day — status 0 in PREC.
+       Absent workers (status 1) are NOT selectable; they are returned in
+       `absent` so the form can list them under "Absent on this date — not
+       eligible for overtime". When the date has no attendance data yet,
+       every worker of the selected shift stays selectable. */
+    var hasAtt = false, absent = [], list = base;
+    if(info.source === 'record' && dateVal && Object.prototype.hasOwnProperty.call(dateIdx, dateVal)){
+      hasAtt = true;
+      var di = dateIdx[dateVal];
+      list = [];
+      base.forEach(function(s){
+        var pi = OT_PIDX[s.emp];
+        var r = (typeof pi === 'number') ? PREC[pi][di] : null;
+        if(r && r[2] === 0) list.push(s);
+        else if(r && r[2] === 1) absent.push(s);
+      });
+    }
+    return { list: list, absent: absent, hasAtt: hasAtt, info: info, want: want, dateVal: dateVal };
   }
   function otBuildWorkerList(){
     if(!otWorkerList) return;
@@ -2547,7 +2644,21 @@ body{font-size:15.5px;letter-spacing:-.005em}
       } else {
         var label = f.want === 'Night' ? 'Night' : 'Day';
         var when = f.dateVal ? otFmtDate(f.dateVal) : '';
-        noteEl.textContent = 'Showing ' + label + '-shift workers for ' + when;
+        noteEl.textContent = f.hasAtt
+          ? 'Showing Present ' + label + '-shift workers for ' + when + ' \u2014 only workers present that day can be selected for overtime'
+          : 'Showing ' + label + '-shift workers for ' + when;
+      }
+    }
+    var absentBox = document.getElementById('otAbsentBox');
+    if(absentBox){
+      if(f.absent && f.absent.length){
+        var tip = 'Absent on ' + otFmtDate(f.dateVal) + ' \u2014 not eligible for overtime';
+        var items = f.absent.map(function(s){
+          return '<li><span class="ot-aname" title="' + esc(tip) + '">' + esc(s.name) + '</span><span class="ot-wemp">Emp ' + esc(s.emp) + '</span></li>';
+        }).join('');
+        absentBox.innerHTML = '<details class="ot-absent-note"><summary>Absent on this date (' + f.absent.length + ') \u2014 not eligible for overtime</summary><ul class="ot-absent-list">' + items + '</ul></details>';
+      } else {
+        absentBox.innerHTML = '';
       }
     }
     var h = '';
@@ -2700,7 +2811,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       h += '<button type="button" class="ot-btn-delete" data-ot-rec-delete="' + esc(k) + '" data-ot-rec-del-date="' + esc(d) + '" data-ot-rec-del-shift="' + esc(sh) + '" aria-label="Delete record for ' + esc(otFmtDate(d)) + ' ' + esc(sh) + '" title="Delete this date and shift">&times; Delete</button>';
       h += '</div>';
       if(isOpen){
-        h += '<div class="ot-rec-detail">' + otTableHTML(ws, true) + '</div>';
+        h += '<div class="ot-rec-detail">' + otTableHTML(ws, true, { kind: 'rec', date: d, shift: sh }) + '</div>';
       }
       h += '</div>';
     });
@@ -2760,7 +2871,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       h += '<button type="button" class="ot-btn-delete" data-ot-hist-delete="' + x.idx + '" aria-label="Delete history entry for ' + esc(otFmtDate(e.date)) + ' ' + esc(sh) + '" title="Delete this history entry">&times; Delete</button>';
       h += '</div>';
       if(isOpen){
-        h += '<div class="ot-rec-detail">' + otTableHTML(ws, true) + '</div>';
+        h += '<div class="ot-rec-detail">' + otTableHTML(ws, true, { kind: 'hist', key: x.it.key, date: e.date, shift: sh }) + '</div>';
       }
       h += '</div>';
     });
@@ -2769,8 +2880,10 @@ body{font-size:15.5px;letter-spacing:-.005em}
   }
 
   /* ===== Overtime Excel — OVER TIME SHEET (ONE unified sheet, with overtime) =====
-     Rows = all 69 staff (dashboard order), columns = days of the month, last
-     column = "Total hours this month". There is NO 1st Shift / 2nd Shift
+     Rows = all 69 staff (dashboard order), columns = days of the month, then
+     "Total hours this month" and, immediately right of it, "Total Night" —
+     the Night Shift Allowance count: nights present (0) + nights overtime
+     (1.5); Day overtime never counts toward it. There is NO 1st Shift / 2nd Shift
      sheet split: every worker is on this one sheet. Overtime IS shown,
      read from Firebase through otAllRecordEntries() — the live Record AND
      the pushed store together, de-duplicated by entry identity — exactly
@@ -2880,6 +2993,12 @@ body{font-size:15.5px;letter-spacing:-.005em}
       var pIdx = OT_PIDX[s.emp];
       var cells = [];
       var total = 0;
+      /* Total Night (Night Shift Allowance count): days this worker's cell
+         is Night-present (0, green, kind 'p') PLUS Night-overtime (1.5,
+         green, kind 'otn'). Day overtime (1.5, white, kind 'otd') never
+         counts — the cell KIND decides, not the value, because Day and
+         Night overtime both read 1.5. */
+      var totalNight = 0;
       for(var d2 = 1; d2 <= daysInMonth; d2++){
         var iso2 = ym + '-' + otPad2(d2);
         var cell = { k: '', v: '' };
@@ -2892,6 +3011,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
         if(otShift){
           cell = (otShift === '2nd Shift') ? { k: 'otn', v: OT_HOURS } : { k: 'otd', v: OT_HOURS };
           total += OT_HOURS;
+          if(cell.k === 'otn') totalNight++;
           cells.push(cell);
           continue;
         }
@@ -2913,9 +3033,10 @@ body{font-size:15.5px;letter-spacing:-.005em}
             cell = (rostered === 'Night') ? { k: 'p', v: 0 } : { k: 'dp', v: '' };
           }
         }
+        if(cell.k === 'p') totalNight++;
         cells.push(cell);
       }
-      return { name: s.name, emp: s.emp, cells: cells, total: total };
+      return { name: s.name, emp: s.emp, cells: cells, total: total, totalNight: totalNight };
     });
     return { daysInMonth: daysInMonth, weekend: weekend, holiday: holiday, rows: rows, hasData: hasAtt };
   }
@@ -2929,7 +3050,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     for(var d = 1; d <= mx.daysInMonth; d++){
       h += '<th' + ((mx.weekend[d - 1] || mx.holiday[d - 1]) ? ' class="mx-w"' : '') + '>' + d + '</th>';
     }
-    h += '<th class="mx-total">Total hours this month</th>';
+    h += '<th class="mx-total">Total hours this month</th><th class="mx-total mx-night">Total Night</th>';
     h += '</tr></thead><tbody>';
     mx.rows.forEach(function(r, i){
       h += '<tr><td class="mx-sr">' + (i + 1) + '</td><td class="mx-name">' + esc(r.name) + '</td><td class="mx-emp">' + esc(r.emp) + '</td>';
@@ -2943,7 +3064,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
         else if(mx.weekend[ci] || mx.holiday[ci]) cls = ' class="mx-w"';
         h += '<td' + cls + '>' + (c.v === '' ? '' : esc(c.v)) + '</td>';
       });
-      h += '<td class="mx-total">' + otHoursText(r.total) + '</td>';
+      h += '<td class="mx-total">' + otHoursText(r.total) + '</td><td class="mx-total mx-night">' + r.totalNight + '</td>';
       h += '</tr>';
     });
     h += '</tbody></table></div></div>';
@@ -3070,9 +3191,13 @@ body{font-size:15.5px;letter-spacing:-.005em}
   }
   function otMatrixSheet(sheetName, ym){
     var mx = otMatrix(ym);
-    /* ONE unified sheet — no shift split and no extra night-count column:
-       SR No. | Name | Employee No. | day columns | Total hours this month. */
-    var nCols = 3 + mx.daysInMonth + 1;
+    /* ONE unified sheet — no shift split:
+       SR No. | Name | Employee No. | day columns | Total hours this month |
+       Total Night. Total Night is written as a computed VALUE, never a
+       COUNTIF over 1.5: Day overtime and Night overtime are both 1.5 in
+       Excel, so a formula could not tell them apart and would wrongly
+       count Day overtime as a night. */
+    var nCols = 3 + mx.daysInMonth + 2;
     var rows = [];
     rows.push([{ v: 'OVER TIME SHEET', s: MXS.TITLE }]);
     var metaRow = [];
@@ -3083,6 +3208,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       head.push({ v: d, s: (mx.weekend[d - 1] || mx.holiday[d - 1]) ? MXS.HEADW : MXS.HEAD });
     }
     head.push({ v: 'Total hours this month', s: MXS.HEAD });
+    head.push({ v: 'Total Night', s: MXS.HEAD });
     rows.push(head);
     mx.rows.forEach(function(r, i){
       var row = [{ v: i + 1, s: MXS.CENTER }, { v: r.name, s: MXS.LEFT }, { v: r.emp, s: MXS.LEFT }];
@@ -3096,11 +3222,13 @@ body{font-size:15.5px;letter-spacing:-.005em}
         else row.push({ v: null, s: MXS.CENTER });
       });
       row.push({ v: r.total, s: MXS.TOTAL });
+      row.push({ v: r.totalNight, s: MXS.TOTAL });
       rows.push(row);
     });
     var widths = [7, 26, 13];
     for(var d2 = 1; d2 <= mx.daysInMonth; d2++) widths.push(4.5);
     widths.push(13);
+    widths.push(11);
     return { name: sheetName, widths: widths, rows: rows, merges: ['A1:' + colName(nCols) + '1'] };
   }
   function otExcelFilename(sel){
@@ -3244,11 +3372,13 @@ body{font-size:15.5px;letter-spacing:-.005em}
     var head = ['SR No.', 'Name', 'Employee No.'];
     for(var d = 1; d <= mx.daysInMonth; d++) head.push(String(d));
     head.push('Total hours this month');
+    head.push('Total Night');
     lines.push(head.map(otCsvCell).join(','));
     mx.rows.forEach(function(r, i){
       var row = [String(i + 1), r.name, r.emp];
       r.cells.forEach(function(c){ row.push(c.k === 'a' ? '-' : ((c.k === 'otd' || c.k === 'otn') ? String(OT_HOURS) : ((c.k === '' || c.k === 'dp') ? '' : String(c.v)))); });
       row.push(String(r.total));
+      row.push(String(r.totalNight));
       lines.push(row.map(otCsvCell).join(','));
     });
     return lines.join('\n');
@@ -3389,6 +3519,20 @@ body{font-size:15.5px;letter-spacing:-.005em}
   var otRecordListEl = document.getElementById('otRecordList');
   if(otRecordListEl){
     otRecordListEl.addEventListener('click', function(e){
+      var wdelBtn = e.target.closest('[data-ot-rec-wdel]');
+      if(wdelBtn){
+        e.preventDefault(); e.stopPropagation();
+        var wEmp = wdelBtn.getAttribute('data-ot-rec-wdel');
+        var wDate = wdelBtn.getAttribute('data-ot-wdel-date');
+        var wShift = wdelBtn.getAttribute('data-ot-wdel-shift') || '1st Shift';
+        var wName = wEmp;
+        for(var wi = 0; wi < OT_STAFF.length; wi++){ if(OT_STAFF[wi].emp === wEmp){ wName = OT_STAFF[wi].name; break; } }
+        otShowPasswordPrompt(function(){
+          otDeleteWorkerFromEntry(wDate, wShift, wEmp, null);
+          otShowConfirm('Removed ' + esc(wName) + ' from the overtime entry for ' + esc(otFmtDate(wDate)) + ' (' + esc(wShift) + ') — only that worker\u2019s cell was cleared in the Overtime Excel sheet.');
+        });
+        return;
+      }
       var delBtn = e.target.closest('[data-ot-rec-delete]');
       if(delBtn){
         e.preventDefault(); e.stopPropagation();
@@ -3412,7 +3556,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       if(e.key !== 'Enter' && e.key !== ' ') return;
       var row = e.target.closest('[data-ot-rec-toggle]');
       if(!row) return;
-      if(e.target.closest('[data-ot-rec-delete]')) return;
+      if(e.target.closest('[data-ot-rec-delete]') || e.target.closest('[data-ot-rec-wdel]')) return;
       e.preventDefault();
       var d3 = row.getAttribute('data-ot-rec-toggle');
       otRecordExpanded[d3] = !otRecordExpanded[d3];
@@ -3422,7 +3566,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
   var otHistoryListEl = document.getElementById('otHistoryList');
   if(otHistoryListEl){
     function otHistToggleFromEvent(e){
-      if(e.target.closest('[data-ot-hist-delete]')) return false;
+      if(e.target.closest('[data-ot-hist-delete]') || e.target.closest('[data-ot-hist-wdel]')) return false;
       var row = e.target.closest('[data-ot-hist-toggle]');
       if(!row) return false;
       var idx = parseInt(row.getAttribute('data-ot-hist-toggle'), 10);
@@ -3432,6 +3576,21 @@ body{font-size:15.5px;letter-spacing:-.005em}
       return true;
     }
     otHistoryListEl.addEventListener('click', function(e){
+      var wdelBtn = e.target.closest('[data-ot-hist-wdel]');
+      if(wdelBtn){
+        e.preventDefault(); e.stopPropagation();
+        var wEmp = wdelBtn.getAttribute('data-ot-hist-wdel');
+        var wKey = wdelBtn.getAttribute('data-ot-hist-wdel-key');
+        var wDate = wdelBtn.getAttribute('data-ot-wdel-date');
+        var wShift = wdelBtn.getAttribute('data-ot-wdel-shift') || '1st Shift';
+        var wName = wEmp;
+        for(var wi = 0; wi < OT_STAFF.length; wi++){ if(OT_STAFF[wi].emp === wEmp){ wName = OT_STAFF[wi].name; break; } }
+        otShowPasswordPrompt(function(){
+          otDeleteWorkerFromEntry(wDate, wShift, wEmp, wKey);
+          otShowConfirm('Removed ' + esc(wName) + ' from the overtime entry for ' + esc(otFmtDate(wDate)) + ' (' + esc(wShift) + ') — only that worker\u2019s cell was cleared in the Overtime Excel sheet.');
+        }, OT_HISTORY_DELETE_PASSWORD);
+        return;
+      }
       var delBtn = e.target.closest('[data-ot-hist-delete]');
       if(delBtn){
         e.preventDefault(); e.stopPropagation();
