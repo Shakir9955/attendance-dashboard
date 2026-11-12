@@ -308,6 +308,7 @@ a{color:inherit}
 .ot-mx .mx-name{text-align:left;font-weight:600;min-width:130px}
 .ot-mx .mx-emp{min-width:82px}
 .ot-mx .mx-g{background:#c6e0b4;font-weight:600}
+.ot-mx .mx-otd{background:#ffffff;font-weight:700}
 .ot-mx .mx-o{background:#ffc000;font-weight:700}
 .ot-mx .mx-w{background:#f8cbad}
 .ot-mx .mx-total{font-weight:800;min-width:56px;background:#f2f2f2}
@@ -890,7 +891,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     </div>
 
     <div class="ot-view" id="otViewExcel" role="tabpanel" aria-label="Overtime Excel" hidden>
-      <p class="ot-xl-note">Attendance sheet — one row per worker, one column per day, with <strong>no overtime</strong> in it. <strong>0</strong> = present on Night shift, <strong>-</strong> = absent, blank = present on Day shift or no data / weekend / holiday. The Total hours this month column stays and shows 0 for everyone.</p>
+      <p class="ot-xl-note">OVER TIME SHEET — one row per worker, one column per day, reviewed against attendance, Day shift and Night shift. <strong>Overtime 1.5</strong> = white cell for Day (1st Shift) overtime, green cell for Night (2nd Shift) overtime — overtime is 1.5 hours on normal days, never more. <strong>0</strong> = present on Night shift, <strong>-</strong> = absent, blank = present on Day shift or no data / weekend / holiday.</p>
       <div class="ot-field">
         <label for="otExcelMonth">Month</label>
         <select id="otExcelMonth"></select>
@@ -2281,6 +2282,47 @@ body{font-size:15.5px;letter-spacing:-.005em}
     });
     return out;
   }
+  /* ===== No-double-entry rules (user order 12 Nov 2026) =====
+     One entry per (date, shift): at most ONE overtime entry may exist for
+     a given date AND shift, across Requests (any live status), the Record
+     and the pushed store. And a worker may appear in at most ONE entry
+     per date (any shift). The submit handler blocks both cases with a
+     clear in-page message; the approve handler re-checks the Record. */
+  function otEntryExistsForDateShift(dateStr, shiftStr){
+    var i, e;
+    for(i = 0; i < otRequests.length; i++){
+      e = otRequests[i];
+      if(e.status !== 'Rejected' && e.date === dateStr && otShiftOf(e) === shiftStr) return true;
+    }
+    for(i = 0; i < otRecord.length; i++){
+      e = otRecord[i];
+      if(e.date === dateStr && otShiftOf(e) === shiftStr) return true;
+    }
+    for(i = 0; i < otPushed.length; i++){
+      e = otPushed[i];
+      if(e.date === dateStr && otShiftOf(e) === shiftStr) return true;
+    }
+    return false;
+  }
+  /* Names of workers from `workers` who already have overtime on `dateStr`
+     in any entry (any shift) — used to block a worker being entered twice
+     on the same date. */
+  function otWorkersAlreadyOnDate(dateStr, workers){
+    var taken = {};
+    function collect(list){
+      list.forEach(function(e){
+        if(!e || e.date !== dateStr) return;
+        if(e.status === 'Rejected') return;
+        (e.workers || []).forEach(function(w){ if(w && w.emp) taken[w.emp] = w.name || w.emp; });
+      });
+    }
+    collect(otRequests); collect(otRecord); collect(otPushed);
+    var dup = [];
+    (workers || []).forEach(function(w){
+      if(w && w.emp && Object.prototype.hasOwnProperty.call(taken, w.emp)) dup.push(w.name);
+    });
+    return dup;
+  }
   /* "Pushing data into Excel sheet": copy every entry currently in the
      Overtime Record into the pushed store (skipping any already pushed),
      then clear the Record list. Overtime Requests are NOT touched.
@@ -2705,7 +2747,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
       var e = x.it.entry;
       var ws = e.workers || [];
       var sh = otShiftOf(e);
-      var hrs = (typeof e.hours === 'number' && isFinite(e.hours)) ? e.hours : OT_HOURS;
+      var hrs = Math.min((typeof e.hours === 'number' && isFinite(e.hours)) ? e.hours : OT_HOURS, OT_HOURS);
       var total = otHoursText(ws.length * hrs);
       var isOpen = !!otHistoryExpanded[x.it.key];
       var statusTxt = x.it.inRecord ? 'In Record' : 'Pushed to Excel';
@@ -2726,17 +2768,22 @@ body{font-size:15.5px;letter-spacing:-.005em}
     el.innerHTML = h;
   }
 
-  /* ===== Overtime Excel — clean attendance sheet (ONE unified sheet) =====
+  /* ===== Overtime Excel — OVER TIME SHEET (ONE unified sheet, with overtime) =====
      Rows = all 69 staff (dashboard order), columns = days of the month, last
      column = "Total hours this month". There is NO 1st Shift / 2nd Shift
-     split: every worker is on this one sheet. This sheet contains NO
-     overtime at all — no 1.5 cells and no data from the Overtime Record
-     or the pushed store. Cells come ONLY from the dashboard attendance
-     data. Present cells are shift-aware: 0 (green) only when the worker
-     was rostered Night shift that day, blank (white) when rostered Day
-     shift that day. "-" (orange) = Absent that day (any shift), blank
-     (peach) = no data / weekend / holiday for that day. The Total hours
-     column is kept and is always 0, because there is no overtime here. */
+     sheet split: every worker is on this one sheet. Overtime IS shown,
+     read from Firebase through otAllRecordEntries() — the live Record AND
+     the pushed store together, de-duplicated by entry identity — exactly
+     as the History list reads it. The overtime entry's OWN shift decides
+     the cell: Day (1st Shift) overtime = 1.5 on a WHITE cell, Night
+     (2nd Shift) overtime = 1.5 on a GREEN cell. Overtime is capped at
+     1.5 hours per worker per day (normal days), never more. The other
+     cells come from the dashboard attendance data and stay shift-aware:
+     "-" (orange) = Absent that day regardless of shift; Present shows
+     0 (green) only when the worker was rostered Night shift that day and
+     stays blank (white) when rostered Day shift that day; blank (peach)
+     = no data / weekend / holiday for that day. "Total hours this month"
+     is the worker's overtime hours for the month (1.5 per overtime day). */
   var OT_PIDX = {};
   PEOPLE.forEach(function(p, i){ OT_PIDX[p[0]] = i; });
   var OT_FIRST_DATE = DATES.length ? DATES[0] : '';
@@ -2754,6 +2801,14 @@ body{font-size:15.5px;letter-spacing:-.005em}
       var ym = String(d || '').slice(0, 7);
       if(/^\d{4}-\d{2}$/.test(ym) && !seen[ym]){ seen[ym] = true; list.push(ym); }
     });
+    /* Months that hold overtime entries are listed too, so a month's
+       overtime is never hidden from the dropdown. */
+    try{
+      otAllRecordEntries().forEach(function(e){
+        var ym = String((e && e.date) || '').slice(0, 7);
+        if(/^\d{4}-\d{2}$/.test(ym) && !seen[ym]){ seen[ym] = true; list.push(ym); }
+      });
+    }catch(e2){}
     list.sort();
     list.reverse();
     return list;
@@ -2772,8 +2827,9 @@ body{font-size:15.5px;letter-spacing:-.005em}
   }
   function otPad2(n){ return (n < 10 ? '0' : '') + n; }
   /* Build the unified matrix for one month — ONE sheet for all workers,
-     with NO shift split and NO overtime: cells are attendance only.
-     Cell: { k: 'p' (present Night, 0) | 'dp' (present Day, blank white) |
+     with NO shift split, WITH overtime restored.
+     Cell: { k: 'otd' (Day overtime, 1.5 white) | 'otn' (Night overtime,
+     1.5 green) | 'p' (present Night, 0) | 'dp' (present Day, blank white) |
      'a' (absent, "-") | '' (blank), v: value }.
      weekend[d] / holiday[d] mark the peach columns (Sat/Sun, plus a weekday inside
      the recorded range with no attendance data at all — a plant holiday). */
@@ -2782,6 +2838,25 @@ body{font-size:15.5px;letter-spacing:-.005em}
     var daysInMonth = new Date(y, mo, 0).getDate();
     var hasAtt = false;
     DATES.forEach(function(d){ if(String(d).slice(0, 7) === ym) hasAtt = true; });
+    /* Overtime lookup for this month: "date|emp" -> the overtime entry's
+       own shift. Built from otAllRecordEntries() (live Record + pushed
+       store, de-duplicated), so the sheet, the Record and History always
+       agree. A worker appears at most once per date here — the first
+       entry wins — so a cell can never show more than one overtime. */
+    var otMap = {};
+    var hasOt = false;
+    otAllRecordEntries().forEach(function(e){
+      if(!e || String(e.date || '').slice(0, 7) !== ym) return;
+      hasOt = true;
+      var sh = otShiftOf(e);
+      (e.workers || []).forEach(function(w){
+        var emp = w && (w.emp || '');
+        if(!emp) return;
+        var key = e.date + '|' + emp;
+        if(!Object.prototype.hasOwnProperty.call(otMap, key)) otMap[key] = sh;
+      });
+    });
+    if(hasOt) hasAtt = true;
     var weekend = [], holiday = [];
     for(var d = 1; d <= daysInMonth; d++){
       var iso = ym + '-' + otPad2(d);
@@ -2804,13 +2879,25 @@ body{font-size:15.5px;letter-spacing:-.005em}
     var rows = OT_STAFF.map(function(s){
       var pIdx = OT_PIDX[s.emp];
       var cells = [];
+      var total = 0;
       for(var d2 = 1; d2 <= daysInMonth; d2++){
         var iso2 = ym + '-' + otPad2(d2);
         var cell = { k: '', v: '' };
+        /* Overtime first: if this worker has an overtime entry on this
+           date, the cell is 1.5 — WHITE for Day (1st Shift) overtime,
+           GREEN for Night (2nd Shift) overtime; the entry's own shift
+           decides. Capped at OT_HOURS (1.5), never more. The monthly
+           total counts this day once. */
+        var otShift = otMap[iso2 + '|' + s.emp];
+        if(otShift){
+          cell = (otShift === '2nd Shift') ? { k: 'otn', v: OT_HOURS } : { k: 'otd', v: OT_HOURS };
+          total += OT_HOURS;
+          cells.push(cell);
+          continue;
+        }
         var di = Object.prototype.hasOwnProperty.call(dateIdx, iso2) ? dateIdx[iso2] : -1;
         var r = (di >= 0 && typeof pIdx === 'number') ? PREC[pIdx][di] : null;
-        /* Shift-aware Present rule (single unified sheet, no shift split,
-           attendance only — no overtime):
+        /* Shift-aware Present rule (single unified sheet, no shift split):
            Absent shows "-" (orange) regardless of shift. Present shows
            0 (green) only when the worker was rostered NIGHT shift that
            day; when rostered DAY shift that day it stays blank (white,
@@ -2828,7 +2915,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
         }
         cells.push(cell);
       }
-      return { name: s.name, emp: s.emp, cells: cells, total: 0 };
+      return { name: s.name, emp: s.emp, cells: cells, total: total };
     });
     return { daysInMonth: daysInMonth, weekend: weekend, holiday: holiday, rows: rows, hasData: hasAtt };
   }
@@ -2848,7 +2935,9 @@ body{font-size:15.5px;letter-spacing:-.005em}
       h += '<tr><td class="mx-sr">' + (i + 1) + '</td><td class="mx-name">' + esc(r.name) + '</td><td class="mx-emp">' + esc(r.emp) + '</td>';
       r.cells.forEach(function(c, ci){
         var cls = '';
-        if(c.k === 'p') cls = ' class="mx-g"';
+        if(c.k === 'otn') cls = ' class="mx-g"';
+        else if(c.k === 'otd') cls = ' class="mx-otd"';
+        else if(c.k === 'p') cls = ' class="mx-g"';
         else if(c.k === 'a') cls = ' class="mx-o"';
         else if(c.k === 'dp') cls = '';
         else if(mx.weekend[ci] || mx.holiday[ci]) cls = ' class="mx-w"';
@@ -2998,7 +3087,9 @@ body{font-size:15.5px;letter-spacing:-.005em}
     mx.rows.forEach(function(r, i){
       var row = [{ v: i + 1, s: MXS.CENTER }, { v: r.name, s: MXS.LEFT }, { v: r.emp, s: MXS.LEFT }];
       r.cells.forEach(function(c, ci){
-        if(c.k === 'p') row.push({ v: 0, s: MXS.GREEN });
+        if(c.k === 'otn') row.push({ v: OT_HOURS, s: MXS.GREEN });
+        else if(c.k === 'otd') row.push({ v: OT_HOURS, s: MXS.CENTER });
+        else if(c.k === 'p') row.push({ v: 0, s: MXS.GREEN });
         else if(c.k === 'a') row.push({ v: '-', s: MXS.AMBER });
         else if(c.k === 'dp') row.push({ v: null, s: MXS.CENTER });
         else if(mx.weekend[ci] || mx.holiday[ci]) row.push({ v: null, s: MXS.PEACH });
@@ -3156,7 +3247,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     lines.push(head.map(otCsvCell).join(','));
     mx.rows.forEach(function(r, i){
       var row = [String(i + 1), r.name, r.emp];
-      r.cells.forEach(function(c){ row.push(c.k === 'a' ? '-' : ((c.k === '' || c.k === 'dp') ? '' : String(c.v))); });
+      r.cells.forEach(function(c){ row.push(c.k === 'a' ? '-' : ((c.k === 'otd' || c.k === 'otn') ? String(OT_HOURS) : ((c.k === '' || c.k === 'dp') ? '' : String(c.v)))); });
       row.push(String(r.total));
       lines.push(row.map(otCsvCell).join(','));
     });
@@ -3213,6 +3304,18 @@ body{font-size:15.5px;letter-spacing:-.005em}
     var sel = otSelected();
     if(!dateVal){ otShowMsg('Please choose the overtime date.'); return; }
     if(!sel.length){ otShowMsg('Please select at least 1 worker for overtime.'); return; }
+    /* NO DOUBLE ENTRY: one entry per date + shift, and no worker twice
+       on the same date (any shift) — checked against Requests, the
+       Record and the pushed store. Blocked submits change nothing. */
+    if(otEntryExistsForDateShift(dateVal, shiftVal)){
+      otShowMsg('An overtime entry already exists for this date and shift (' + otFmtDate(dateVal) + ' — ' + shiftVal + '). Only one entry per date and shift is allowed.');
+      return;
+    }
+    var dupWorkers = otWorkersAlreadyOnDate(dateVal, sel);
+    if(dupWorkers.length){
+      otShowMsg('Already entered for overtime on ' + otFmtDate(dateVal) + ': ' + dupWorkers.join(', ') + '. A worker cannot be entered twice on the same date.');
+      return;
+    }
     var req = {
       id: 'ot' + Date.now().toString(36) + Math.floor(Math.random()*100000).toString(36),
       date: dateVal,
@@ -3263,6 +3366,16 @@ body{font-size:15.5px;letter-spacing:-.005em}
       otPersist(); otRenderRequests();
       otShowConfirm('Marked as reviewed — status: Pending Approval. When you are ready, use the <strong>Open approval email</strong> button on the request to send the approval email to ' + esc(OT_APPROVAL_NAME + ' (' + OT_APPROVAL_EMAIL + ')') + ' with CC to ' + esc(OT_CC_NAME + ' (' + OT_CC_EMAIL + ')') + ' (it opens in your email app; this page stays open).');
     } else if(action === 'approve'){
+      /* ONE ENTRY PER DATE+SHIFT in the Record: never approve a second
+         entry into the Record for a date + shift that already has one. */
+      var recClash = false;
+      for(var ci = 0; ci < otRecord.length; ci++){
+        if(otRecord[ci].date === req.date && otShiftOf(otRecord[ci]) === otShiftOf(req) && otRecord[ci].requestId !== req.id){ recClash = true; break; }
+      }
+      if(recClash){
+        otShowConfirm('Cannot approve — an overtime entry already exists in the Record for ' + esc(otFmtDate(req.date)) + ' (' + esc(otShiftOf(req)) + '). Only one entry per date and shift is allowed.');
+        return;
+      }
       req.status = 'Approved';
       otRecord.push({ date: req.date, shift: otShiftOf(req), hours: OT_HOURS, workers: req.workers.slice(), requestId: req.id });
       otPersist(); otRenderRequests(); otRenderRecord();
