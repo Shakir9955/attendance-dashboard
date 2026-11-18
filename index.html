@@ -1981,10 +1981,17 @@ body{font-size:15.5px;letter-spacing:-.005em}
       var s = '';
       if(pg.first){
         s += txt('F2', 16, 40, 48, d.name);
-        s += txt('F1', 11, 40, 68, 'Emp No: ' + d.emp);
-        s += txt('F1', 11, 40, 84, d.roleGroup);
-        s += txt('F1', 11, 40, 100, 'Period: ' + d.monthLabel);
-        s += txt('F1', 11, 40, 116, 'Days recorded: ' + d.days + '   Present: ' + d.present + '   Absent: ' + d.absent + '   Late arrivals: ' + d.late + '   Attendance: ' + d.pct + '%');
+        if(d.hideEmp){
+          /* Name only — no Employee No. anywhere on this PDF. */
+          s += txt('F1', 11, 40, 68, d.roleGroup);
+          s += txt('F1', 11, 40, 84, 'Period: ' + d.monthLabel);
+          s += txt('F1', 11, 40, 100, 'Days recorded: ' + d.days + '   Present: ' + d.present + '   Absent: ' + d.absent + '   Late arrivals: ' + d.late + '   Attendance: ' + d.pct + '%');
+        } else {
+          s += txt('F1', 11, 40, 68, 'Emp No: ' + d.emp);
+          s += txt('F1', 11, 40, 84, d.roleGroup);
+          s += txt('F1', 11, 40, 100, 'Period: ' + d.monthLabel);
+          s += txt('F1', 11, 40, 116, 'Days recorded: ' + d.days + '   Present: ' + d.present + '   Absent: ' + d.absent + '   Late arrivals: ' + d.late + '   Attendance: ' + d.pct + '%');
+        }
         s += tableHead(140);
       } else {
         s += txt('F2', 11, 40, 40, d.name + ' - ' + d.monthLabel);
@@ -3765,29 +3772,66 @@ body{font-size:15.5px;letter-spacing:-.005em}
     return lv;
   }
   function trkIsEarly(r){
-    /* Early going is recorded in the day notes ('Early Out', 'Left early…'). */
-    return /early/i.test(NOTES[r[7]] || '');
+    /* Early going: the day notes say so ('Early Out', 'Left early…'), OR the
+       worker left before the shift ended — Time Out before 17:30 on Day
+       shift, or before 05:30 the next morning on Night shift. A blank Time
+       Out counts as Early going only when the notes say so. */
+    if(/early/i.test(NOTES[r[7]] || '')) return true;
+    var out = r[5];
+    if(!out) return false;
+    var p = String(out).split(':');
+    if(p.length < 2) return false;
+    var hh = parseInt(p[0], 10), mm = parseInt(p[1], 10);
+    var ss = p.length > 2 ? parseInt(p[2], 10) : 0;
+    if(isNaN(hh) || isNaN(mm)) return false;
+    var sec = hh * 3600 + mm * 60 + (isNaN(ss) ? 0 : ss);
+    if(r[1]){
+      /* Night shift ends 05:30 the next morning: an Out before noon belongs
+         to that next morning; an Out from noon onwards is the same evening,
+         which is still before the shift ends. */
+      var eff = hh < 12 ? sec + 86400 : sec;
+      return eff < (5 * 3600 + 30 * 60) + 86400;
+    }
+    return sec < 17 * 3600 + 30 * 60;
+  }
+  /* Category membership — categories overlap, with one exception:
+     Present = every day the worker was present, Late coming and Early
+     going days included (they are present days);
+     Absent = plain absent days only — a day on leave (CL/PL/SL) never
+     counts as Absent;
+     Late coming = Late days only; Early going = early-out days only;
+     Casual / Privilege / Sick Leave = every day on that leave, even a
+     day that is also Late or Early going (it then counts in both).
+     Selecting several categories lists the union of their days, each
+     day shown once. */
+  function trkIsLateDay(r){ return r[2] === 0 && r[3] === 1; }
+  function trkIsEarlyDay(r){ return r[2] === 0 && trkIsEarly(r); }
+  function trkIsPresentDay(r){ return r[2] === 0; }
+  function trkHasAnyLeave(r){ return !!(LEAVES[r[6]] || ''); }
+  function trkIsPlainAbsent(r){ return r[2] === 1 && !trkHasAnyLeave(r); }
+  function trkBelongs(r, key){
+    if(key === 'present') return trkIsPresentDay(r);
+    if(key === 'absent') return trkIsPlainAbsent(r);
+    if(key === 'late') return trkIsLateDay(r);
+    if(key === 'early') return trkIsEarlyDay(r);
+    return trkLeaveKey(r) === key;
   }
   function trkMatch(r){
-    if(trkSelected.present && r[2] === 0) return true;
-    if(trkSelected.absent && r[2] === 1) return true;
-    if(trkSelected.late && r[2] === 0 && r[3] === 1) return true;
-    if(trkSelected.early && r[2] === 0 && trkIsEarly(r)) return true;
-    var lk = trkLeaveKey(r);
-    if(lk && trkSelected[lk]) return true;
-    return false;
+    return TRK_CATS.some(function(c){ return trkSelected[c.key] && trkBelongs(r, c.key); });
   }
   function trkStatusHTML(r){
     if(r[2] === 1){
       var lv = trkLeaveLabel(r);
       return '<span class="status-tag absent">Absent</span>' + (lv ? ' <span class="trk-leave">' + esc(lv) + '</span>' : '');
     }
-    var h = '<span class="status-tag">Present</span>';
-    if(r[3] === 1) h += ' <span class="status-tag late">Late</span>';
-    if(trkIsEarly(r)) h += ' <span class="status-tag late">Early going</span>';
+    /* Every present day carries the Present tag; a Late and/or Early
+       going day carries those tags alongside it. */
+    var tags = ['<span class="status-tag">Present</span>'];
+    if(r[3] === 1) tags.push('<span class="status-tag late">Late</span>');
+    if(trkIsEarly(r)) tags.push('<span class="status-tag late">Early going</span>');
     var lv2 = trkLeaveLabel(r);
-    if(lv2) h += ' <span class="trk-leave">' + esc(lv2) + '</span>';
-    return h;
+    if(lv2) tags.push('<span class="trk-leave">' + esc(lv2) + '</span>');
+    return tags.join(' ');
   }
   function trkRender(){
     if(!trkResultsEl || !trkWorkerSel) return;
@@ -3810,9 +3854,9 @@ body{font-size:15.5px;letter-spacing:-.005em}
       var r = recs[di];
       if(!r || r[2] === 2) return; /* no record, or not yet joined */
       if(!trkMatch(r)) return;
-      if(r[2] === 0){ counts.present++; if(r[3] === 1) counts.late++; if(trkIsEarly(r)) counts.early++; }
-      else counts.absent++;
-      var lk = trkLeaveKey(r); if(lk) counts[lk]++;
+      /* Count each shown day under every selected category it belongs
+         to — a Late day counts in both Present and Late coming. */
+      TRK_CATS.forEach(function(c){ if(trkSelected[c.key] && trkBelongs(r, c.key)) counts[c.key]++; });
       rows.push({ dt: dt, r: r });
     });
     var bits = [];
@@ -3842,12 +3886,12 @@ body{font-size:15.5px;letter-spacing:-.005em}
     trkLastRows = rows.map(function(item){
       var r = item.r;
       var leave = trkLeaveLabel(r);
-      if(!leave && r[2] === 0 && trkIsEarly(r)) leave = 'Early going';
+      if(r[2] === 0 && trkIsEarly(r)) leave = leave ? leave + ' - Early going' : 'Early going';
       return [ shortDate(item.dt) + ' ' + item.dt.slice(0, 4), DOW_FULL[parseDate(item.dt).getDay()],
         r[1] ? 'Night' : 'Day', r[2] === 1 ? 'Absent' : 'Present',
         (r[2] === 0 && r[3] === 1) ? 'Yes' : '—', r[4] ? r[4] : '—', r[5] ? r[5] : '—', leave ];
     });
-    trkLastMeta = { name: p[1], emp: p[0], roleGroup: groupLabel(p),
+    trkLastMeta = { name: p[1], emp: '', hideEmp: true, roleGroup: groupLabel(p),
       period: shortDate(from) + ' ' + from.slice(0, 4) + ' to ' + shortDate(to) + ' ' + to.slice(0, 4),
       counts: counts, total: rows.length,
       filenameBase: p[1].replace(/\s+/g, '-') + '-Attendance-Tracker' };
@@ -3883,7 +3927,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     if(!trkLastMeta || !trkLastRows.length) return;
     trkMsg(''); trkHideReady();
     var c = trkLastMeta.counts, denom = c.present + c.absent;
-    var d = { name: trkLastMeta.name, emp: trkLastMeta.emp, roleGroup: trkLastMeta.roleGroup,
+    var d = { name: trkLastMeta.name, emp: trkLastMeta.emp, hideEmp: trkLastMeta.hideEmp, roleGroup: trkLastMeta.roleGroup,
       monthLabel: trkLastMeta.period + ' (Attendance Tracker)', days: trkLastMeta.total,
       present: c.present, absent: c.absent, late: c.late,
       pct: denom ? pctOf(c.present, denom) : '0', rows: trkLastRows };
@@ -3910,7 +3954,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
     ['Worker', 'Apprentice'].forEach(function(g){
       if(!trkGroups[g] || !trkGroups[g].length) return;
       wh += '<optgroup label="' + (g === 'Worker' ? 'Workers' : 'Apprentices') + '">';
-      trkGroups[g].forEach(function(i){ wh += '<option value="' + i + '">' + esc(PEOPLE[i][1]) + ' — ' + esc(PEOPLE[i][0]) + '</option>'; });
+      trkGroups[g].forEach(function(i){ wh += '<option value="' + i + '">' + esc(PEOPLE[i][1]) + '</option>'; });
       wh += '</optgroup>';
     });
     trkWorkerSel.innerHTML = wh;
