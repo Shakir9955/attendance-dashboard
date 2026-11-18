@@ -184,6 +184,38 @@ a{color:inherit}
 .btn-overtime:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .btn-overtime.open{background:var(--accent);color:#fff}
 @media(max-width:560px){.btn-overtime{padding:8px 12px;font-size:12.5px}}
+/* Attendance Tracker tab — sits beside Overtime in the header row */
+.btn-tracker{background:var(--surface);color:var(--accent-dark);border-color:var(--accent);margin-left:0}
+@media(prefers-color-scheme:dark){.btn-tracker{color:var(--accent)}}
+.btn-tracker:hover{background:var(--accent-soft);color:var(--accent-dark)}
+@media(prefers-color-scheme:dark){.btn-tracker:hover{color:var(--accent)}}
+.btn-tracker.open{background:var(--accent);color:#fff}
+/* Attendance Tracker panel — worker + date range + category filters */
+.trk-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px 16px;margin-top:16px}
+.trk-filters .ot-field{margin-bottom:8px}
+.trk-filters .ot-field select,.trk-filters .ot-field input[type="date"]{max-width:none}
+.trk-cat-field{grid-column:span 2}
+@media(max-width:480px){.trk-cat-field{grid-column:auto}}
+.trk-cat-label{display:block;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.trk-cats{display:flex;flex-wrap:wrap;gap:7px}
+.trk-cat{appearance:none;font:inherit;font-size:13.5px;font-weight:700;line-height:1;padding:10px 13px;min-height:40px;border-radius:999px;border:1.5px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;white-space:nowrap}
+.trk-cat:hover{border-color:var(--accent);color:var(--accent-dark)}
+@media(prefers-color-scheme:dark){.trk-cat:hover{color:var(--accent)}}
+.trk-cat[aria-pressed="true"]{background:var(--navy);border-color:var(--navy);color:#fff}
+@media(prefers-color-scheme:dark){.trk-cat[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#06231f}}
+.trk-cat:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.trk-cat-tools{display:flex;gap:8px;margin-top:9px}
+.trk-summary{margin:14px 0 0;font-size:14px;color:var(--muted);line-height:1.55}
+.trk-summary strong{color:var(--text)}
+.trk-table-wrap{margin-top:12px}
+.trk-table{min-width:0}
+.trk-table .status-tag{margin-left:0}
+.trk-date{font-weight:700;white-space:nowrap}
+.trk-sub{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-top:1px;white-space:nowrap}
+.trk-time{white-space:nowrap;font-variant-numeric:tabular-nums}
+.trk-leave{font-size:12.5px;font-weight:700;color:var(--amber)}
+#trkPdfBtn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+@media(max-width:560px){.trk-date{white-space:normal}.trk-sub{white-space:normal}}
 /* Overtime panel — placeholder view opened by the Overtime tab */
 .overtime-panel{margin-top:18px;background:var(--surface);border:1.5px solid var(--accent);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px}
 .overtime-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
@@ -672,6 +704,9 @@ body{font-size:15.5px;letter-spacing:-.005em}
 .btn-overtime{background:var(--accent);color:#fff;border:1.5px solid var(--accent);border-radius:10px;min-height:44px;padding:10px 18px;box-shadow:0 6px 16px rgba(15,118,110,.35)}
 .btn-overtime:hover{background:#0d9488;color:#fff}
 .btn-overtime.open{background:#fff;color:var(--navy);border-color:#fff}
+.btn-tracker{background:#fff;color:var(--navy);border-color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.18)}
+.btn-tracker:hover{background:var(--accent-soft);color:var(--navy)}
+.btn-tracker.open{background:var(--accent);color:#fff;border-color:var(--accent)}
 .cal-popover{border-radius:14px;box-shadow:0 24px 48px rgba(15,42,61,.28),0 4px 12px rgba(15,42,61,.14);padding:16px}
 .cal-pop-day{border-radius:8px}
 .cal-pop-day.active{box-shadow:0 4px 10px rgba(15,118,110,.35)}
@@ -834,6 +869,7 @@ body{font-size:15.5px;letter-spacing:-.005em}
         </div>
       </div>
       <button type="button" class="btn-overtime" id="overtimeBtn" aria-expanded="false" aria-controls="overtimePanel" title="Open Overtime">Overtime</button>
+      <button type="button" class="btn-overtime btn-tracker" id="trackerBtn" aria-expanded="false" aria-controls="trackerPanel" title="Open Attendance Tracker">Attendance Tracker</button>
       </div>
     </div>
   </div>
@@ -921,6 +957,52 @@ body{font-size:15.5px;letter-spacing:-.005em}
       <p class="ot-xl-copied" id="otExcelShareMsg" role="status" hidden></p>
       <p class="ot-xl-copied" id="otExcelCopiedMsg" role="status" hidden>Copied &#8212; paste into Excel</p>
     </div>
+  </section>
+
+  <section class="overtime-panel tracker-panel" id="trackerPanel" role="region" aria-label="Attendance Tracker" hidden>
+    <div class="overtime-head">
+      <h2>Attendance Tracker</h2>
+      <button type="button" class="btn-close-red" id="trackerCloseBtn">× Close</button>
+    </div>
+    <p class="overtime-note">Select a worker, a date range and one or more categories — the matching days are listed below automatically. Data runs from 1 Jan 2026 to the latest recorded day, and new days are added here on their own as the dashboard is updated.</p>
+    <div class="trk-filters">
+      <div class="ot-field">
+        <label for="trkWorker">Name of Worker</label>
+        <select id="trkWorker"></select>
+      </div>
+      <div class="ot-field">
+        <label for="trkFrom">Date — From</label>
+        <input type="date" id="trkFrom">
+      </div>
+      <div class="ot-field">
+        <label for="trkTo">Date — To</label>
+        <input type="date" id="trkTo">
+      </div>
+      <div class="ot-field trk-cat-field">
+        <span class="trk-cat-label" id="trkCatLabel">Categories — tap to include / exclude</span>
+        <div class="trk-cats" role="group" aria-labelledby="trkCatLabel">
+          <button type="button" class="trk-cat" data-trk-cat="present" aria-pressed="true">Present</button>
+          <button type="button" class="trk-cat" data-trk-cat="absent" aria-pressed="true">Absent</button>
+          <button type="button" class="trk-cat" data-trk-cat="late" aria-pressed="true">Late coming</button>
+          <button type="button" class="trk-cat" data-trk-cat="early" aria-pressed="true">Early going</button>
+          <button type="button" class="trk-cat" data-trk-cat="cl" aria-pressed="true">Casual Leave</button>
+          <button type="button" class="trk-cat" data-trk-cat="pl" aria-pressed="true">Privilege Leave</button>
+          <button type="button" class="trk-cat" data-trk-cat="sl" aria-pressed="true">Sick Leave</button>
+        </div>
+        <div class="trk-cat-tools">
+          <button type="button" class="ot-small-btn" id="trkCatsAll">Select All</button>
+          <button type="button" class="ot-small-btn" id="trkCatsNone">Clear All</button>
+        </div>
+      </div>
+    </div>
+    <p class="trk-summary" id="trkSummary" role="status"></p>
+    <div id="trkResults"></div>
+    <div class="ot-xl-actions">
+      <button type="button" class="btn-dl btn-dl-pdf" id="trkPdfBtn" aria-label="Download this tracker list as a PDF file" disabled>&#8595; Download PDF</button>
+    </div>
+    <p class="profile-download-msg" id="trkDlMsg" role="alert" hidden></p>
+    <p class="profile-download-ready" id="trkDlReady" hidden></p>
+    <p class="ot-xl-copied" id="trkDlNote" role="status" hidden></p>
   </section>
 
   <section class="hero">
@@ -3636,6 +3718,228 @@ body{font-size:15.5px;letter-spacing:-.005em}
   otUpdateCount();
   otRenderRequests();
   otRenderRecord();
+
+  /* ===== Attendance Tracker — per-worker filter over the full record =====
+     Reads the same baked-in DATA as the rest of the dashboard (1 Jan 2026
+     to the latest recorded day), so every daily update extends it with no
+     extra work. One worker at a time, a From–To date range, and any mix of
+     the seven categories; the matching days list automatically below. */
+  var trackerBtn = document.getElementById('trackerBtn');
+  var trackerPanel = document.getElementById('trackerPanel');
+  var trackerCloseBtn = document.getElementById('trackerCloseBtn');
+  var trkWorkerSel = document.getElementById('trkWorker');
+  var trkFromInput = document.getElementById('trkFrom');
+  var trkToInput = document.getElementById('trkTo');
+  var trkSummaryEl = document.getElementById('trkSummary');
+  var trkResultsEl = document.getElementById('trkResults');
+  var trkPdfBtn = document.getElementById('trkPdfBtn');
+  var TRK_CATS = [
+    { key:'present', label:'Present' },
+    { key:'absent', label:'Absent' },
+    { key:'late', label:'Late coming' },
+    { key:'early', label:'Early going' },
+    { key:'cl', label:'Casual Leave' },
+    { key:'pl', label:'Privilege Leave' },
+    { key:'sl', label:'Sick Leave' }
+  ];
+  var trkSelected = { present:true, absent:true, late:true, early:true, cl:true, pl:true, sl:true };
+  var trkLastRows = [];
+  var trkLastMeta = null;
+
+  function trkLeaveKey(r){
+    var lv = LEAVES[r[6]] || '';
+    if(lv === 'CL') return 'cl';
+    if(lv === 'PL' || lv === 'PL (In-process)') return 'pl';
+    if(lv === 'SL' || lv === 'Sick') return 'sl';
+    return '';
+  }
+  function trkLeaveLabel(r){
+    var lv = LEAVES[r[6]] || '';
+    if(lv === 'CL') return 'Casual Leave (CL)';
+    if(lv === 'PL') return 'Privilege Leave (PL)';
+    if(lv === 'PL (In-process)') return 'Privilege Leave (PL) - In-process';
+    if(lv === 'SL') return 'Sick Leave (SL)';
+    if(lv === 'Sick') return 'Sick Leave';
+    if(lv === 'Leave') return 'Leave';
+    if(lv === 'In-process') return 'Leave - In-process';
+    return lv;
+  }
+  function trkIsEarly(r){
+    /* Early going is recorded in the day notes ('Early Out', 'Left early…'). */
+    return /early/i.test(NOTES[r[7]] || '');
+  }
+  function trkMatch(r){
+    if(trkSelected.present && r[2] === 0) return true;
+    if(trkSelected.absent && r[2] === 1) return true;
+    if(trkSelected.late && r[2] === 0 && r[3] === 1) return true;
+    if(trkSelected.early && r[2] === 0 && trkIsEarly(r)) return true;
+    var lk = trkLeaveKey(r);
+    if(lk && trkSelected[lk]) return true;
+    return false;
+  }
+  function trkStatusHTML(r){
+    if(r[2] === 1){
+      var lv = trkLeaveLabel(r);
+      return '<span class="status-tag absent">Absent</span>' + (lv ? ' <span class="trk-leave">' + esc(lv) + '</span>' : '');
+    }
+    var h = '<span class="status-tag">Present</span>';
+    if(r[3] === 1) h += ' <span class="status-tag late">Late</span>';
+    if(trkIsEarly(r)) h += ' <span class="status-tag late">Early going</span>';
+    var lv2 = trkLeaveLabel(r);
+    if(lv2) h += ' <span class="trk-leave">' + esc(lv2) + '</span>';
+    return h;
+  }
+  function trkRender(){
+    if(!trkResultsEl || !trkWorkerSel) return;
+    trkLastRows = []; trkLastMeta = null;
+    if(trkPdfBtn) trkPdfBtn.disabled = true;
+    var pi = trkWorkerSel.value !== '' ? parseInt(trkWorkerSel.value, 10) : -1;
+    if(pi < 0 || !PEOPLE[pi]){
+      if(trkSummaryEl) trkSummaryEl.textContent = '';
+      trkResultsEl.innerHTML = '<div class="ot-empty">Select a worker above — their matching days will be listed here automatically.</div>';
+      return;
+    }
+    var from = (trkFromInput && trkFromInput.value) || DATES[0];
+    var to = (trkToInput && trkToInput.value) || DATES[DATES.length - 1];
+    if(from > to){ var tmp = from; from = to; to = tmp; }
+    var p = PEOPLE[pi], recs = PREC[pi];
+    var anyCat = TRK_CATS.some(function(c){ return trkSelected[c.key]; });
+    var rows = [], counts = { present:0, absent:0, late:0, early:0, cl:0, pl:0, sl:0 };
+    DATES.forEach(function(dt, di){
+      if(dt < from || dt > to) return;
+      var r = recs[di];
+      if(!r || r[2] === 2) return; /* no record, or not yet joined */
+      if(!trkMatch(r)) return;
+      if(r[2] === 0){ counts.present++; if(r[3] === 1) counts.late++; if(trkIsEarly(r)) counts.early++; }
+      else counts.absent++;
+      var lk = trkLeaveKey(r); if(lk) counts[lk]++;
+      rows.push({ dt: dt, r: r });
+    });
+    var bits = [];
+    TRK_CATS.forEach(function(c){ if(counts[c.key]) bits.push(c.label + ' ' + counts[c.key]); });
+    if(trkSummaryEl){
+      trkSummaryEl.innerHTML = 'Showing <strong>' + rows.length + ' day' + (rows.length === 1 ? '' : 's') + '</strong> for <strong>' + esc(p[1]) + '</strong> — ' +
+        esc(shortDate(from) + ' ' + from.slice(0, 4)) + ' to ' + esc(shortDate(to) + ' ' + to.slice(0, 4)) +
+        (bits.length ? ' • ' + esc(bits.join(' • ')) : '') + '.';
+    }
+    if(!rows.length){
+      trkResultsEl.innerHTML = '<div class="ot-empty">' + (anyCat
+        ? 'No days match these filters for ' + esc(p[1]) + ' in this date range.'
+        : 'No category is selected — tap at least one category above (Present, Absent, Casual Leave…) to list days.') + '</div>';
+      return;
+    }
+    var h = '<div class="ot-table-wrap trk-table-wrap"><table class="ot-table trk-table"><thead><tr><th>Date</th><th>Time In</th><th>Time Out</th><th>Status / Leave</th></tr></thead><tbody>';
+    rows.forEach(function(item){
+      var r = item.r;
+      h += '<tr><td><span class="trk-date">' + esc(shortDate(item.dt) + ' ' + item.dt.slice(0, 4)) + '</span>' +
+        '<span class="trk-sub">' + DOW3[parseDate(item.dt).getDay()] + ' • ' + (r[1] ? 'Night Shift' : 'Day Shift') + '</span></td>' +
+        '<td class="trk-time">' + (r[4] ? esc(r[4]) : '—') + '</td>' +
+        '<td class="trk-time">' + (r[5] ? esc(r[5]) : '—') + '</td>' +
+        '<td>' + trkStatusHTML(r) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    trkResultsEl.innerHTML = h;
+    trkLastRows = rows.map(function(item){
+      var r = item.r;
+      var leave = trkLeaveLabel(r);
+      if(!leave && r[2] === 0 && trkIsEarly(r)) leave = 'Early going';
+      return [ shortDate(item.dt) + ' ' + item.dt.slice(0, 4), DOW_FULL[parseDate(item.dt).getDay()],
+        r[1] ? 'Night' : 'Day', r[2] === 1 ? 'Absent' : 'Present',
+        (r[2] === 0 && r[3] === 1) ? 'Yes' : '—', r[4] ? r[4] : '—', r[5] ? r[5] : '—', leave ];
+    });
+    trkLastMeta = { name: p[1], emp: p[0], roleGroup: groupLabel(p),
+      period: shortDate(from) + ' ' + from.slice(0, 4) + ' to ' + shortDate(to) + ' ' + to.slice(0, 4),
+      counts: counts, total: rows.length,
+      filenameBase: p[1].replace(/\s+/g, '-') + '-Attendance-Tracker' };
+    if(trkPdfBtn) trkPdfBtn.disabled = false;
+  }
+  function trkMsg(text){
+    var m = document.getElementById('trkDlMsg');
+    if(!m) return;
+    if(text){ m.textContent = text; m.hidden = false; } else { m.textContent = ''; m.hidden = true; }
+  }
+  function trkNote(text){
+    var n = document.getElementById('trkDlNote');
+    if(!n) return;
+    if(text){ n.textContent = text; n.hidden = false; } else { n.textContent = ''; n.hidden = true; }
+  }
+  function trkHideReady(){
+    var r = document.getElementById('trkDlReady');
+    if(r){ r.hidden = true; r.innerHTML = ''; }
+    trkNote('');
+  }
+  function trkShowReady(url, filename){
+    var r = document.getElementById('trkDlReady');
+    if(!r) return;
+    r.innerHTML = '';
+    r.appendChild(document.createTextNode('Your file is ready — if the download did not start on its own, tap the file name to save it: '));
+    var a = document.createElement('a');
+    a.href = url; a.setAttribute('download', filename); a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = '\u2B07 ' + filename;
+    r.appendChild(a);
+    r.hidden = false;
+  }
+  function trkDownloadPDF(){
+    if(!trkLastMeta || !trkLastRows.length) return;
+    trkMsg(''); trkHideReady();
+    var c = trkLastMeta.counts, denom = c.present + c.absent;
+    var d = { name: trkLastMeta.name, emp: trkLastMeta.emp, roleGroup: trkLastMeta.roleGroup,
+      monthLabel: trkLastMeta.period + ' (Attendance Tracker)', days: trkLastMeta.total,
+      present: c.present, absent: c.absent, late: c.late,
+      pct: denom ? pctOf(c.present, denom) : '0', rows: trkLastRows };
+    try {
+      var fname = trkLastMeta.filenameBase + '.pdf';
+      var url = deliverGeneratedFile(buildPdfBlob(d), fname, {
+        onOpened: function(){ trkNote('File opened in a new tab — use your browser\u2019s Save/Download there.'); },
+        onShared: function(){ trkNote('Share sheet opened — tap Save to Files / Download to save the PDF file.'); }
+      });
+      if(url) trkShowReady(url, fname);
+      else trkMsg('The PDF could not be created — please try again.');
+    } catch(err){ trkMsg('The PDF could not be created — please try again.'); }
+  }
+  function setTracker(open){
+    if(!trackerPanel) return;
+    trackerPanel.hidden = !open;
+    if(trackerBtn){ trackerBtn.setAttribute('aria-expanded', open ? 'true' : 'false'); trackerBtn.classList.toggle('open', !!open); }
+    if(open){ setOvertime(false); trackerPanel.scrollIntoView({ behavior:'smooth', block:'start' }); }
+  }
+  if(trkWorkerSel){
+    var trkGroups = { Worker: [], Apprentice: [] };
+    PEOPLE.forEach(function(p, i){ (trkGroups[p[3]] || (trkGroups[p[3]] = [])).push(i); });
+    var wh = '<option value="">Select a worker…</option>';
+    ['Worker', 'Apprentice'].forEach(function(g){
+      if(!trkGroups[g] || !trkGroups[g].length) return;
+      wh += '<optgroup label="' + (g === 'Worker' ? 'Workers' : 'Apprentices') + '">';
+      trkGroups[g].forEach(function(i){ wh += '<option value="' + i + '">' + esc(PEOPLE[i][1]) + ' — ' + esc(PEOPLE[i][0]) + '</option>'; });
+      wh += '</optgroup>';
+    });
+    trkWorkerSel.innerHTML = wh;
+    trkWorkerSel.addEventListener('change', trkRender);
+  }
+  if(trkFromInput){ trkFromInput.min = DATES[0]; trkFromInput.max = DATES[DATES.length - 1]; trkFromInput.value = DATES[0]; trkFromInput.addEventListener('change', trkRender); }
+  if(trkToInput){ trkToInput.min = DATES[0]; trkToInput.max = DATES[DATES.length - 1]; trkToInput.value = DATES[DATES.length - 1]; trkToInput.addEventListener('change', trkRender); }
+  document.querySelectorAll('[data-trk-cat]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var k = btn.getAttribute('data-trk-cat');
+      trkSelected[k] = !trkSelected[k];
+      btn.setAttribute('aria-pressed', trkSelected[k] ? 'true' : 'false');
+      trkRender();
+    });
+  });
+  function trkSetAllCats(v){
+    TRK_CATS.forEach(function(c){ trkSelected[c.key] = v; });
+    document.querySelectorAll('[data-trk-cat]').forEach(function(b){ b.setAttribute('aria-pressed', v ? 'true' : 'false'); });
+    trkRender();
+  }
+  var trkCatsAllBtn = document.getElementById('trkCatsAll');
+  var trkCatsNoneBtn = document.getElementById('trkCatsNone');
+  if(trkCatsAllBtn) trkCatsAllBtn.addEventListener('click', function(){ trkSetAllCats(true); });
+  if(trkCatsNoneBtn) trkCatsNoneBtn.addEventListener('click', function(){ trkSetAllCats(false); });
+  if(trkPdfBtn) trkPdfBtn.addEventListener('click', trkDownloadPDF);
+  if(trackerBtn) trackerBtn.addEventListener('click', function(){ setTracker(trackerPanel && trackerPanel.hidden); });
+  if(trackerCloseBtn) trackerCloseBtn.addEventListener('click', function(){ setTracker(false); if(trackerBtn) trackerBtn.focus(); });
+  if(overtimeBtn) overtimeBtn.addEventListener('click', function(){ if(trackerPanel && !trackerPanel.hidden) setTracker(false); });
+  trkRender();
 
   renderTop10();
   renderRoster();
